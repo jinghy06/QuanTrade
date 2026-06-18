@@ -1,0 +1,7 @@
+{
+  "rf_scenario_acc": 0.5824880382775119,
+  "lgb_scenario_acc": 0.5409569377990431,
+  "fusion_scenario_acc": 0.5673684210526316,
+  "rf_binary_acc": 0.49291866028708137,
+  "lgb_binary_acc": 0.5036363636363637
+}

@@ -1,0 +1,17 @@
+[Unit]
+Description=量化模型同步守护进程
+After=network-online.target quantbot.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/quant_system
+
+# 持续监控SMB模型更新
+ExecStart=/bin/bash /home/pi/quant_system/scripts/sync_daemon.sh
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+[Unit]
+Description=A股量化信号系统 - 树莓派信号哨兵
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/quant_system
+Environment="MINIMAX_API_KEY=your_key"
+Environment="FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxx"
+Environment="LOG_LEVEL=INFO"
+Environment="SMB_HOST=192.168.1.100"
+Environment="SMB_SHARE=quant_sync"
+Environment="SMB_USER=your_windows_user"
+Environment="SMB_PASS=your_windows_password"
+
+# 启动前确保SMB已挂载
+ExecStartPre=/bin/bash -c 'mountpoint -q /mnt/quant_sync || sudo mount -a'
+
+# 主进程: 定时预测模式
+ExecStart=/home/pi/quant_system/venv/bin/python /home/pi/quant_system/signal_bot.py --schedule
+
+# 崩溃后自动重启
+Restart=always
+RestartSec=60
+
+# 资源限制（树莓派内存有限）
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
