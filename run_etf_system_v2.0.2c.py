@@ -147,7 +147,8 @@ def calculate_momentum_score(etf_df: pd.DataFrame, benchmark_df: pd.DataFrame, s
 # ============================================================
 # 三因子
 # ============================================================
-def calculate_three_factors(benchmark_df: pd.DataFrame, gold_df: pd.DataFrame) -> dict:
+def calculate_three_factors(benchmark_df: pd.DataFrame, gold_df: pd.DataFrame, all_prices: dict = None) -> dict:
+    """三因子计算：使用简单版本（精细情绪引擎当前数据条件下会降低收益）"""
     if benchmark_df is None or len(benchmark_df) < 60:
         return {'sentiment': 0, 'geopolitical': 0, 'policy': 0, 'combined': 0}
     
@@ -309,7 +310,7 @@ def main():
         # 三因子
         bench_hist = benchmark_df.loc[:date] if benchmark_df is not None else None
         gold_hist = gold_df.loc[:date] if gold_df is not None else None
-        factors = calculate_three_factors(bench_hist, gold_hist)
+        factors = calculate_three_factors(bench_hist, gold_hist, all_prices)
         
         # 调仓判断：只在初始建仓、情绪高点或大跌时调仓
         trigger_reason = None
