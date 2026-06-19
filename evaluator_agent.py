@@ -227,28 +227,32 @@ class EvaluationAgent:
         train_excess = train_strategy.mean() - train_benchmark.mean()
         test_excess = test_strategy.mean() - test_benchmark.mean()
         
-        # 收益衰减率
-        if train_excess != 0:
+        # 收益衰减率（当训练期超额极低时，不计算衰减率）
+        if train_excess != 0 and abs(train_excess) > 0.0001:  # 至少日均0.01%才计算
             decay_rate = (train_excess - test_excess) / abs(train_excess)
         else:
-            decay_rate = 0
+            decay_rate = 0  # 训练期无超额，不算衰减
         
-        # 夏普比率衰减
+        # 夏普比率衰减（同样处理）
         train_sharpe = self._calculate_sharpe(train_strategy)
         test_sharpe = self._calculate_sharpe(test_strategy)
-        sharpe_decay = (train_sharpe - test_sharpe) / max(abs(train_sharpe), 0.01)
+        if abs(train_sharpe) > 0.01:
+            sharpe_decay = (train_sharpe - test_sharpe) / max(abs(train_sharpe), 0.01)
+        else:
+            sharpe_decay = 0
         
         # 过拟合评分（0-1，越高越可能过拟合）
         overfit_score = 0
         if decay_rate > 0.5:
             overfit_score += 0.3
-            self.warnings.append(f"⚠️ 收益衰减严重: {decay_rate:.1%}")
+            self.warnings.append(f"警告: 收益衰减严重: {decay_rate:.1%}")
         if sharpe_decay > 0.5:
             overfit_score += 0.3
-            self.warnings.append(f"⚠️ 夏普比率衰减严重: {sharpe_decay:.1%}")
-        if train_excess > 0 and test_excess < 0:
+            self.warnings.append(f"警告: 夏普比率衰减严重: {sharpe_decay:.1%}")
+        # 只有当训练期和测试期超额都有显著差异时才判断过拟合
+        if train_excess > 0.0001 and test_excess < -0.0001:
             overfit_score += 0.4
-            self.warnings.append("🚨 训练期正超额，测试期负超额 - 强烈过拟合信号")
+            self.warnings.append("严重警告: 训练期正超额，测试期负超额 - 强烈过拟合信号")
         
         metrics = {
             'train_excess_return': train_excess,
@@ -267,7 +271,7 @@ class EvaluationAgent:
         self.log(f"  过拟合评分: {overfit_score:.2f} (0=无过拟合, 1=严重过拟合)")
         
         if overfit_score > 0.5:
-            self.log("  🚨 警告：检测到过拟合风险！")
+            self.log("  警告: 检测到过拟合风险!")
         
         return metrics
     
@@ -309,7 +313,7 @@ class EvaluationAgent:
             })
         
         if not window_results:
-            self.warnings.append("⚠️ Walk-Forward验证数据不足")
+            self.warnings.append("[警告] Walk-Forward验证数据不足")
             return {'wf_n_positive_windows': 0, 'wf_consistency': 0}
         
         # 统计各窗口表现
@@ -342,9 +346,9 @@ class EvaluationAgent:
         self.log(f"  收益稳定性(CV): {cv:.2f}")
         
         if consistency < 0.5:
-            self.warnings.append(f"⚠️ Walk-Forward一致性低: {consistency:.1%}")
+            self.warnings.append(f"[警告] Walk-Forward一致性低: {consistency:.1%}")
         if cv > 2:
-            self.warnings.append(f"⚠️ 收益波动过大(CV={cv:.2f})")
+            self.warnings.append(f"[警告] 收益波动过大(CV={cv:.2f})")
         
         return metrics
     
@@ -405,9 +409,9 @@ class EvaluationAgent:
         self.log(f"  90%置信区间: [{ci_lower:.4f}, {ci_upper:.4f}]")
         
         if one_tail_p >= 0.05:
-            self.warnings.append("⚠️ 超额收益统计不显著 - 可能是运气")
+            self.warnings.append("[警告] 超额收益统计不显著 - 可能是运气")
         if ci_lower <= 0 <= ci_upper:
-            self.warnings.append("⚠️ Bootstrap置信区间包含0 - 收益不确定")
+            self.warnings.append("[警告] Bootstrap置信区间包含0 - 收益不确定")
         
         return metrics
     
@@ -420,6 +424,11 @@ class EvaluationAgent:
         市场环境适应性分析
         检验策略在不同市场环境下的表现
         """
+        # 对齐索引
+        common_idx = strategy_returns.index.intersection(benchmark_returns.index)
+        strategy_returns = strategy_returns.loc[common_idx]
+        benchmark_returns = benchmark_returns.loc[common_idx]
+        
         # 用基准收益划分市场环境
         benchmark_cum = (1 + benchmark_returns).cumprod()
         
@@ -432,7 +441,7 @@ class EvaluationAgent:
         sideways_mask = ~bull_mask & ~bear_mask  # 震荡市
         
         results = {}
-        for regime_name, mask in [("bull", bull_mask), ("bear", bear_mask), ("sideways", sideways_mask)]:
+        for regime_name, mask in [("牛市", bull_mask), ("熊市", bear_mask), ("震荡市", sideways_mask)]:
             if mask.sum() < 20:
                 continue
             
@@ -453,7 +462,9 @@ class EvaluationAgent:
         results['regime_robustness'] = regime_effective / max(len([k for k in results if k.endswith('_excess')]), 1)
         
         if results.get('regime_robustness', 0) < 0.5:
-            self.warnings.append("⚠️ 策略只在部分市场环境有效，鲁棒性不足")
+            self.warnings.append("[警告] 策略只在部分市场环境有效，鲁棒性不足")
+        
+        return results
         
         return results
     
@@ -497,11 +508,11 @@ class EvaluationAgent:
         
         for cost in cost_levels:
             excess = results[f'excess_at_{cost:.1%}_cost']
-            status = "✓" if excess > 0 else "✗"
+            status = "OK" if excess > 0 else "FAIL"
             self.log(f"  成本{cost:.1%}时超额: {excess:.2%} {status}")
         
         if breakeven_cost < 0.003:
-            self.warnings.append(f"⚠️ 盈亏平衡成本过低({breakeven_cost:.2%})，策略对成本敏感")
+            self.warnings.append(f"[警告] 盈亏平衡成本过低({breakeven_cost:.2%})，策略对成本敏感")
         
         return results
     
@@ -554,7 +565,7 @@ class EvaluationAgent:
         self.log(f"  精确率: {precision:.2%}, 召回率: {recall:.2%}, F1: {f1:.3f}")
         
         if skill_score < 0.05:
-            self.warnings.append("⚠️ 预测技能得分低，模型预测能力有限")
+            self.warnings.append("[警告] 预测技能得分低，模型预测能力有限")
         
         return metrics
     
@@ -654,15 +665,15 @@ class EvaluationAgent:
         warnings_count = len(self.warnings)
         
         if score >= 80 and warnings_count == 0:
-            return "✅ 策略质量优秀，可以考虑实盘验证"
+            return "[OK] 策略质量优秀，可以考虑实盘验证"
         elif score >= 65 and warnings_count <= 1:
-            return "✅ 策略质量良好，建议进一步优化后实盘测试"
+            return "[OK] 策略质量良好，建议进一步优化后实盘测试"
         elif score >= 50:
-            return "⚠️ 策略质量一般，存在明显问题需要解决"
+            return "[警告] 策略质量一般，存在明显问题需要解决"
         elif score >= 35:
-            return "❌ 策略质量较差，不建议实盘使用"
+            return "[失败] 策略质量较差，不建议实盘使用"
         else:
-            return "🚨 策略质量极差，需要重新设计"
+            return "[严重警告] 策略质量极差，需要重新设计"
     
     def print_report(self, report: EvaluationReport):
         """打印完整评价报告"""
@@ -670,16 +681,16 @@ class EvaluationAgent:
         print("                    QuanTrade 独立评价报告")
         print("=" * 70)
         
-        print(f"\n📊 综合评分: {report.overall_score:.1f}/100")
-        print(f"📈 等级: {report.grade}")
-        print(f"🎯 判断: {report.verdict}")
+        print(f"\n[评分] 综合评分: {report.overall_score:.1f}/100")
+        print(f"[等级] 等级: {report.grade}")
+        print(f"[判断] 判断: {report.verdict}")
         
         if report.warnings:
-            print(f"\n⚠️ 警告 ({len(report.warnings)}):")
+            print(f"\n[警告] 警告 ({len(report.warnings)}):")
             for w in report.warnings:
                 print(f"  {w}")
         else:
-            print("\n✅ 无警告")
+            print("\n[OK] 无警告")
         
         print("\n" + "-" * 70)
         print("详细指标:")
@@ -712,7 +723,7 @@ class EvaluationAgent:
         
         # 防过拟合特别提示
         if report.metrics.get('is_overfit', False):
-            print("\n🚨 过拟合警告 🚨")
+            print("\n[严重警告] 过拟合警告 [严重警告]")
             print("策略在训练期表现远好于测试期，这强烈暗示过拟合。")
             print("建议：")
             print("  1. 减少特征数量")
