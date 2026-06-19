@@ -78,7 +78,7 @@ def calculate_momentum_score(etf_df: pd.DataFrame, benchmark_df: pd.DataFrame) -
     动量得分计算
     
     双模式：
-    - 正常市场：选长期动量最强的（趋势跟踪）
+    - 正常市场（120日跌幅<15%）：选长期动量最强的（趋势跟踪）
     - 底部市场（120日跌幅>15%）：选超跌最深的（反弹潜力）
     """
     if len(etf_df) < 120:
@@ -93,8 +93,8 @@ def calculate_momentum_score(etf_df: pd.DataFrame, benchmark_df: pd.DataFrame) -
     is_bottom = mom_120 < -0.15
     
     if is_bottom:
-        # 底部模式：选超跌+开始反弹的ETF
-        # 120日跌幅越大（越超跌）得分越高 — 这是反弹潜力
+        # 底部模式：选超跌最深的ETF（跌幅越大=反弹潜力越大）
+        # 120日跌幅越大（越超跌）得分越高
         score_oversold = np.clip(-mom_120 / 0.30, -1, 1)  # 跌幅>30%得满分
         
         # 60日跌幅越大（越超跌）得分越高
@@ -319,6 +319,17 @@ def main():
             print(f"  {date.date()} 大跌触发加仓")
         
         if should_rebalance:
+            # 判断市场是否处于底部（基于沪深300到当前日期的120日动量）
+            market_bottom = False
+            if benchmark_df is not None and date in benchmark_df.index:
+                bench_hist = benchmark_df.loc[:date]
+                if len(bench_hist) > 120:
+                    bench_close = bench_hist['close']
+                    bench_mom_120 = bench_close.iloc[-1] / bench_close.iloc[-120] - 1
+                    market_bottom = bench_mom_120 < -0.10  # 沪深300 120日跌幅>10%视为市场底部
+                    if market_bottom:
+                        print(f"  {date.date()} [市场底部] 沪深300 120日跌幅: {bench_mom_120:.1%}")
+            
             # 计算所有ETF动量得分
             scores = {}
             for symbol in ETF_POOL:
