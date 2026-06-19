@@ -43,7 +43,7 @@ FUNDAMENTAL_ETFS = ['512010', '159928', '512690', '515170', '515790', '516160', 
 
 # 用户策略参数
 HOLD_MIN_MONTHS = 3          # 持有最低期限3个月
-MAX_POSITIONS = 10           # 最多持仓10只
+MAX_POSITIONS = 10           # 最多持仓10只（实际买入7-8只，取决于市场状态）
 STOCK_RATIO_BULL = 0.98      # 牛市股票仓位98%（几乎满仓）
 STOCK_RATIO_NORMAL = 0.98    # 正常股票仓位98%（几乎满仓）
 STOCK_RATIO_PANIC = 0.50   # 恐慌股票仓位50%
@@ -74,31 +74,66 @@ def load_all_data():
 # 热点赛道得分（纯动量版）
 # ============================================================
 def calculate_momentum_score(etf_df: pd.DataFrame, benchmark_df: pd.DataFrame) -> float:
-    """纯动量热点得分：120日(40%) + 60日(30%) + 20日相对强弱(20%) + 趋势(10%)"""
+    """
+    动量得分计算
+    
+    双模式：
+    - 正常市场：选长期动量最强的（趋势跟踪）
+    - 底部市场（120日跌幅>15%）：选超跌最深的（反弹潜力）
+    """
     if len(etf_df) < 120:
         return -999
     
     close = etf_df['close']
     
     mom_120 = close.iloc[-1] / close.iloc[-120] - 1
-    score_120 = np.clip(mom_120 / 0.5, -1, 1)
-    
     mom_60 = close.iloc[-1] / close.iloc[-60] - 1
-    score_60 = np.clip(mom_60 / 0.3, -1, 1)
     
-    score_relative = 0
-    if benchmark_df is not None and len(benchmark_df) > 120:
-        bench = benchmark_df['close'].reindex(etf_df.index, method='ffill')
-        etf_mom_20 = close.iloc[-1] / close.iloc[-20] - 1
-        bench_mom_20 = bench.iloc[-1] / bench.iloc[-20] - 1
-        score_relative = np.clip((etf_mom_20 - bench_mom_20) / 0.2, -1, 1)
+    # 底部判断：120日跌幅超过15%视为底部
+    is_bottom = mom_120 < -0.15
     
-    ma5 = close.rolling(5).mean().iloc[-1]
-    ma20 = close.rolling(20).mean().iloc[-1]
-    ma60 = close.rolling(60).mean().iloc[-1]
-    trend_score = 0.4 * (1 if ma5 > ma20 else 0) + 0.3 * (1 if ma20 > ma60 else 0) + 0.3 * (1 if close.iloc[-1] > ma5 else 0)
-    
-    return score_120 * 0.40 + score_60 * 0.30 + score_relative * 0.20 + trend_score * 0.10
+    if is_bottom:
+        # 底部模式：选超跌+开始反弹的ETF
+        # 120日跌幅越大（越超跌）得分越高 — 这是反弹潜力
+        score_oversold = np.clip(-mom_120 / 0.30, -1, 1)  # 跌幅>30%得满分
+        
+        # 60日跌幅越大（越超跌）得分越高
+        score_60 = np.clip(-mom_60 / 0.20, -1, 1)  # 60日跌幅>20%得满分
+        
+        # 20日相对强弱：比市场跌得更多 = 反弹潜力更大
+        score_relative = 0
+        if benchmark_df is not None and len(benchmark_df) > 20:
+            bench = benchmark_df['close'].reindex(etf_df.index, method='ffill')
+            bench_mom_20 = bench.iloc[-1] / bench.iloc[-20] - 1
+            etf_mom_20 = close.iloc[-1] / close.iloc[-20] - 1
+            # 比市场多跌 = 得分更高（跌幅差越大，反弹潜力越大）
+            score_relative = np.clip((bench_mom_20 - etf_mom_20) / 0.20, -1, 1)
+        
+        # 趋势：短期均线是否开始向上（确认反弹开始）
+        ma5 = close.rolling(5).mean().iloc[-1]
+        ma10 = close.rolling(10).mean().iloc[-1] if len(etf_df) >= 10 else ma5
+        trend_score = 0.6 * (1 if ma5 > ma10 else 0) + 0.4 * (1 if close.iloc[-1] > ma5 else 0)
+        
+        return score_oversold * 0.40 + score_60 * 0.30 + score_relative * 0.20 + trend_score * 0.10
+    else:
+        # 正常模式：纯动量热点（趋势跟踪）
+        score_120 = np.clip(mom_120 / 0.5, -1, 1)
+        score_60 = np.clip(mom_60 / 0.3, -1, 1)
+        
+        score_relative = 0
+        if benchmark_df is not None and len(benchmark_df) > 120:
+            bench = benchmark_df['close'].reindex(etf_df.index, method='ffill')
+            etf_mom_20 = close.iloc[-1] / close.iloc[-20] - 1
+            bench_mom_20 = bench.iloc[-1] / bench.iloc[-20] - 1
+            score_relative = np.clip((etf_mom_20 - bench_mom_20) / 0.2, -1, 1)
+        
+        ma5 = close.rolling(5).mean().iloc[-1]
+        ma20 = close.rolling(20).mean().iloc[-1]
+        ma60 = close.rolling(60).mean().iloc[-1]
+        trend_score = 0.4 * (1 if ma5 > ma20 else 0) + 0.3 * (1 if ma20 > ma60 else 0) + 0.3 * (1 if close.iloc[-1] > ma5 else 0)
+        
+        return score_120 * 0.40 + score_60 * 0.30 + score_relative * 0.20 + trend_score * 0.10
+
 
 
 # ============================================================
