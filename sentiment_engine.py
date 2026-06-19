@@ -1,449 +1,354 @@
 """
-QuanTrade 2.0 - 情绪/政策/地缘政治引擎
-======================================
-Layer 4: 多因子分析层
+QuanTrade 精细情绪检测模块 (Sentiment Engine)
+基于现有ETF价格/成交量数据构建合成情绪指数
+无需外部API，完全基于技术指标
 
-包含两种模式：
-1. 关键词模式：基于新闻文本的关键词分析（100+正面/负面词库）
-2. 市场代理模式：基于技术指标的情绪代理
-
-所有评分归一化到 [-1, 1] 区间
-正值=看多，负值=看空，0=中性
+情绪指数范围: [-1, 1]
+- 1.0: 极度乐观（全仓追涨）
+- 0.8: 狂热（"连宝妈都入场"）→ 触发减仓
+- 0.5: 乐观
+- 0.0: 中性
+- -0.5: 悲观
+- -0.8: 恐慌（"连大妈都割肉"）→ 触发加仓
+- -1.0: 极度恐慌（全仓割肉）
 """
-
-import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple
-
-
-# ============================================================
-# 关键词词库（按Quantrade2.0.md）
-# ============================================================
-
-# 正面词库（100+）
-POSITIVE_WORDS = [
-    # 涨跌类
-    '涨停', '大涨', '反弹', '突破', '创新高', '飙升', '暴涨', '强势', '领涨',
-    '上涨', '走高', '拉升', '冲高', '新高', '翻倍', '暴涨',
-    
-    # 利好类
-    '利好', '增持', '买入', '看多', '买入评级', '增持评级',
-    '业绩增长', '盈利', '分红', '回购', '战略合作', '订单', '中标',
-    
-    # 政策类
-    '政策支持', '补贴', '减税', '降准', '降息', '宽松', '刺激',
-    '鼓励', '扶持', '改革', '开放', '创新', '发展',
-    
-    # 行业类（AI/芯片）
-    'AI突破', '大模型', '算力', '芯片', '半导体', '集成电路',
-    '人工智能', '机器人', '智能制造', '自动驾驶', '数字化',
-    
-    # 行业类（军工/航天）
-    '国防', '军工', '航天', '卫星', '导弹', '战斗机', '航母',
-    '北斗', '火箭', '航天器', '军事现代化',
-    
-    # 行业类（新能源）
-    '光伏', '新能源', '储能', '锂电池', '风电', '碳中和',
-    '绿色能源', '清洁能源', '电动', '氢能',
-]
-
-# 负面词库（100+）
-NEGATIVE_WORDS = [
-    # 涨跌类
-    '跌停', '大跌', '暴跌', '跳水', '重挫', '弱势', '领跌',
-    '下跌', '走低', '杀跌', '崩盘', '腰斩', '破位', '新低',
-    
-    # 利空类
-    '利空', '减持', '卖出', '看空', '卖出评级', '减持评级',
-    '业绩下滑', '亏损', '退市', 'ST', '违规', '处罚', '调查',
-    
-    # 政策类
-    '加息', '收紧', '监管', '限制', '制裁', '整顿', '打压',
-    '去杠杆', '紧缩', '调控', '限购', '限贷',
-    
-    # 风险类
-    '贸易战', '制裁', '冲突', '战争', '脱钩', '断供',
-    '地缘政治', '金融危机', '泡沫', '黑天鹅', '灰犀牛',
-    
-    # 行业类
-    '产能过剩', '库存积压', '需求下滑', '价格战', '技术封锁',
-]
-
-# 重大事件词库（50+）
-MAJOR_EVENT_WORDS = [
-    # 公司事件
-    '财报', '业绩', '分红', '回购', '增持', '减持',
-    '重组', '并购', 'IPO', '增发', '配股', '可转债',
-    
-    # 政策事件
-    '降准', '降息', '加息', 'MLF', 'LPR', '逆回购',
-    '财政政策', '货币政策', '产业政策', '监管政策',
-    
-    # 国际事件
-    '美联储', '欧央行', 'G7', 'G20', 'APEC', '联合国',
-    '贸易战', '关税', '制裁', '脱钩', '断供',
-    
-    # 市场事件
-    '停牌', '复牌', '退市', 'ST', '*ST',
-    '暴跌', '熔断', '千股跌停', '千股涨停',
-]
+import numpy as np
+from typing import Dict, Optional
+import warnings
+warnings.filterwarnings('ignore')
 
 
 class SentimentEngine:
-    """情绪引擎 - 支持关键词分析和市场代理"""
+    """
+    合成情绪引擎
+    基于多维度技术指标构建市场情绪指数
+    """
     
-    def __init__(self):
-        self.name = "SentimentEngine"
-        self.positive_words = POSITIVE_WORDS
-        self.negative_words = NEGATIVE_WORDS
-        self.major_event_words = MAJOR_EVENT_WORDS
+    def __init__(self, history_window: int = 60):
+        self.history_window = history_window
+        self.history = []  # 情绪历史，用于计算极端值
     
-    def calculate(self, prices_df: pd.DataFrame) -> pd.Series:
+    def calculate(self, all_prices: Dict[str, pd.DataFrame], 
+                  benchmark_df: Optional[pd.DataFrame] = None,
+                  date=None) -> dict:
         """
-        计算情绪得分
+        计算当前市场情绪指数
         
-        Args:
-            prices_df: 包含 close, volume 列的DataFrame
-            
-        Returns:
-            情绪得分 [-1, 1]
-        """
-        scores = pd.DataFrame(index=prices_df.index)
+        参数:
+            all_prices: {symbol: DataFrame} 所有ETF的历史价格
+            benchmark_df: 基准指数（如沪深300）
+            date: 当前日期
         
-        # 1. 波动率情绪：波动率上升=恐慌，下降=平静
-        returns = prices_df['close'].pct_change()
-        volatility = returns.rolling(20).std()
-        vol_ma = volatility.rolling(60).mean()
-        vol_signal = np.where(volatility > vol_ma * 1.5, -0.5,
-                     np.where(volatility < vol_ma * 0.7, 0.5, 0))
-        scores['volatility'] = vol_signal
-        
-        # 2. 动量情绪：短期vs长期动量
-        mom_short = prices_df['close'].pct_change(5)
-        mom_long = prices_df['close'].pct_change(20)
-        mom_signal = np.where((mom_short > 0) & (mom_long > 0), 0.5,
-                     np.where((mom_short < 0) & (mom_long < 0), -0.5, 0))
-        scores['momentum'] = mom_signal
-        
-        # 3. 成交量情绪：放量上涨=乐观，放量下跌=恐慌
-        if 'volume' in prices_df.columns and prices_df['volume'].sum() > 0:
-            vol_change = prices_df['volume'].pct_change(5)
-            price_change = prices_df['close'].pct_change(5)
-            vol_price_signal = np.where((vol_change > 0.3) & (price_change > 0), 0.5,
-                               np.where((vol_change > 0.3) & (price_change < 0), -0.5, 0))
-            scores['volume_price'] = vol_price_signal
-        else:
-            scores['volume_price'] = 0
-        
-        # 4. 均线情绪：价格在均线上方=乐观
-        ma20 = prices_df['close'].rolling(20).mean()
-        ma60 = prices_df['close'].rolling(60).mean()
-        ma_signal = np.where((prices_df['close'] > ma20) & (ma20 > ma60), 0.5,
-                    np.where((prices_df['close'] < ma20) & (ma20 < ma60), -0.5, 0))
-        scores['ma_position'] = ma_signal
-        
-        # 综合情绪得分（等权平均）
-        final_score = scores.mean(axis=1)
-        return final_score.clip(-1, 1)
-    
-    def analyze_text(self, text: str) -> Dict:
-        """
-        分析单条文本的情绪（关键词模式）
-        
-        Args:
-            text: 新闻文本
-            
-        Returns:
+        返回:
             {
-                'sentiment_score': float (-1 到 1),
-                'positive_count': int,
-                'negative_count': int,
-                'is_major': bool
+                'sentiment': float,  # 综合情绪指数 [-1, 1]
+                'components': dict,  # 各子维度得分
+                'level': str,        # 情绪等级
+                'is_extreme': bool,  # 是否极端（>0.8或<-0.8）
+                'action': str        # 建议操作
             }
         """
-        if not text:
-            return {'sentiment_score': 0, 'positive_count': 0, 'negative_count': 0, 'is_major': False}
+        components = {}
         
-        pos_count = sum(1 for w in self.positive_words if w in text)
-        neg_count = sum(1 for w in self.negative_words if w in text)
-        is_major = any(w in text for w in self.major_event_words)
+        # 1. 波动率情绪 (Volatility Sentiment)
+        # 原理: 高波动通常伴随恐慌或狂热
+        vol_sentiment = self._calc_volatility_sentiment(benchmark_df)
+        components['volatility'] = vol_sentiment
         
-        # 计算情绪得分
-        total = pos_count + neg_count
-        if total == 0:
-            score = 0
+        # 2. 动量情绪 (Momentum Sentiment)
+        # 原理: 持续上涨=乐观，持续下跌=悲观
+        mom_sentiment = self._calc_momentum_sentiment(benchmark_df)
+        components['momentum'] = mom_sentiment
+        
+        # 3. 成交量情绪 (Volume Sentiment)
+        # 原理: 放量上涨=乐观，放量下跌=恐慌，缩量=观望
+        vol_sentiment = self._calc_volume_sentiment(all_prices)
+        components['volume'] = vol_sentiment
+        
+        # 4. 广度情绪 (Breadth Sentiment)
+        # 原理: 上涨家数占比越高，情绪越乐观
+        breadth_sentiment = self._calc_breadth_sentiment(all_prices)
+        components['breadth'] = breadth_sentiment
+        
+        # 5. 趋势一致性 (Trend Consensus)
+        # 原理: 短期/中期/长期趋势同向=强情绪，背离=犹豫
+        trend_sentiment = self._calc_trend_consensus(benchmark_df)
+        components['trend'] = trend_sentiment
+        
+        # 加权合成
+        weights = {
+            'volatility': 0.25,   # 波动率权重最高（恐慌/狂热的直接信号）
+            'momentum': 0.25,     # 动量趋势
+            'volume': 0.20,       # 成交量确认
+            'breadth': 0.15,      # 市场广度
+            'trend': 0.15         # 趋势一致性
+        }
+        
+        sentiment = sum(components[k] * weights[k] for k in weights)
+        sentiment = np.clip(sentiment, -1, 1)
+        
+        # 记录历史
+        self.history.append(sentiment)
+        if len(self.history) > self.history_window:
+            self.history.pop(0)
+        
+        # 判断极端值
+        is_extreme = abs(sentiment) > 0.8
+        
+        # 情绪等级
+        if sentiment > 0.8:
+            level = "极度乐观"
+            action = "减仓50%"
+        elif sentiment > 0.6:
+            level = "乐观"
+            action = "减仓30%"
+        elif sentiment > 0.3:
+            level = "偏乐观"
+            action = "持有"
+        elif sentiment > -0.3:
+            level = "中性"
+            action = "持有"
+        elif sentiment > -0.6:
+            level = "偏悲观"
+            action = "观望"
+        elif sentiment > -0.8:
+            level = "悲观"
+            action = "加仓20%"
         else:
-            score = (pos_count - neg_count) / total
-        
-        # 重大事件加权
-        if is_major:
-            score *= 1.5
+            level = "极度恐慌"
+            action = "加仓50%"
         
         return {
-            'sentiment_score': np.clip(score, -1, 1),
-            'positive_count': pos_count,
-            'negative_count': neg_count,
-            'is_major': is_major
+            'sentiment': sentiment,
+            'components': components,
+            'level': level,
+            'is_extreme': is_extreme,
+            'action': action
         }
     
-    def analyze_batch(self, texts: List[str]) -> Dict:
+    def _calc_volatility_sentiment(self, benchmark_df: Optional[pd.DataFrame]) -> float:
         """
-        批量分析文本情绪
+        波动率情绪: 高波动=恐慌/狂热
+        - 波动率快速上升 = 恐慌 (-1)
+        - 波动率高位回落 = 乐观 (+1)
+        - 波动率低位 = 中性 (0)
+        """
+        if benchmark_df is None or len(benchmark_df) < 20:
+            return 0.0
         
-        Args:
-            texts: 新闻文本列表
+        returns = benchmark_df['close'].pct_change().dropna()
+        if len(returns) < 20:
+            return 0.0
+        
+        vol_5d = returns.iloc[-5:].std() * np.sqrt(252)
+        vol_20d = returns.iloc[-20:].std() * np.sqrt(252)
+        vol_60d = returns.iloc[-60:].std() * np.sqrt(252) if len(returns) >= 60 else vol_20d
+        
+        # 波动率变化率
+        vol_change = (vol_5d - vol_20d) / (vol_20d + 1e-8)
+        
+        # 波动率位置（相对于60日历史）
+        vol_position = (vol_5d - vol_60d) / (vol_60d + 1e-8)
+        
+        # 恐慌: 波动率急剧上升
+        # 狂热: 波动率高位但开始下降（价格仍在涨）
+        if vol_change > 0.5:  # 波动率急剧上升
+            return -0.8  # 恐慌
+        elif vol_change > 0.2:
+            return -0.5  # 担忧
+        elif vol_position < -0.3:  # 波动率显著低于均值
+            # 检查是否在上涨（狂热）
+            price_mom_5d = benchmark_df['close'].iloc[-1] / benchmark_df['close'].iloc[-5] - 1
+            if price_mom_5d > 0.05:  # 5天涨5%+
+                return 0.8  # 狂热（低波动+快速上涨=压抑的乐观）
+            return 0.3  # 平静
+        else:
+            return 0.0
+    
+    def _calc_momentum_sentiment(self, benchmark_df: Optional[pd.DataFrame]) -> float:
+        """
+        动量情绪: 持续动量=强情绪
+        - 5日/20日/60日全部上涨 = 极度乐观 (+1)
+        - 5日/20日/60日全部下跌 = 极度悲观 (-1)
+        - 混合 = 犹豫 (0)
+        """
+        if benchmark_df is None or len(benchmark_df) < 60:
+            return 0.0
+        
+        close = benchmark_df['close']
+        mom_5d = close.iloc[-1] / close.iloc[-5] - 1
+        mom_20d = close.iloc[-1] / close.iloc[-20] - 1
+        mom_60d = close.iloc[-1] / close.iloc[-60] - 1
+        
+        # 同向动量
+        if mom_5d > 0 and mom_20d > 0 and mom_60d > 0:
+            # 全部上涨
+            strength = min(mom_5d * 10, 1.0)  # 5日涨10%=满分
+            return 0.5 + strength * 0.5  # [0.5, 1.0]
+        elif mom_5d < 0 and mom_20d < 0 and mom_60d < 0:
+            # 全部下跌
+            strength = min(abs(mom_5d) * 10, 1.0)
+            return -0.5 - strength * 0.5  # [-1.0, -0.5]
+        elif mom_5d > 0 and mom_20d < 0:
+            # 短期反弹，中期下跌 = 犹豫偏乐观
+            return 0.2
+        elif mom_5d < 0 and mom_20d > 0:
+            # 短期回调，中期上涨 = 犹豫偏悲观
+            return -0.2
+        else:
+            return 0.0
+    
+    def _calc_volume_sentiment(self, all_prices: Dict[str, pd.DataFrame]) -> float:
+        """
+        成交量情绪: 放量确认趋势
+        - 放量上涨 = 乐观 (+1)
+        - 放量下跌 = 恐慌 (-1)
+        - 缩量 = 观望 (0)
+        """
+        if not all_prices:
+            return 0.0
+        
+        volume_signals = []
+        for symbol, df in all_prices.items():
+            if len(df) < 20 or 'volume' not in df.columns:
+                continue
             
-        Returns:
-            {
-                'avg_sentiment': float,
-                'max_sentiment': float,
-                'total_positive': int,
-                'total_negative': int,
-                'major_events_count': int
-            }
-        """
-        if not texts:
-            return {
-                'avg_sentiment': 0,
-                'max_sentiment': 0,
-                'total_positive': 0,
-                'total_negative': 0,
-                'major_events_count': 0
-            }
-        
-        results = [self.analyze_text(text) for text in texts]
-        
-        return {
-            'avg_sentiment': np.mean([r['sentiment_score'] for r in results]),
-            'max_sentiment': max([r['sentiment_score'] for r in results]),
-            'total_positive': sum([r['positive_count'] for r in results]),
-            'total_negative': sum([r['negative_count'] for r in results]),
-            'major_events_count': sum([1 for r in results if r['is_major']])
-        }
-
-
-class PolicyEngine:
-    """政策引擎 - 用市场结构代理政策方向"""
-    
-    def __init__(self):
-        self.name = "PolicyEngine"
-    
-    def calculate(self, prices_df: pd.DataFrame, benchmark_df: pd.DataFrame = None) -> pd.Series:
-        """
-        计算政策得分
-        
-        政策代理逻辑：
-        - 大盘持续上涨 + 板块轮动活跃 = 政策支持
-        - 大盘持续下跌 + 成交量萎缩 = 政策收紧
-        - 黄金上涨 = 避险/货币宽松
-        """
-        scores = pd.DataFrame(index=prices_df.index)
-        
-        # 1. 趋势强度：长期趋势的方向和强度
-        ma120 = prices_df['close'].rolling(120).mean()
-        trend = (prices_df['close'] - ma120) / ma120
-        trend_signal = np.where(trend > 0.1, 0.5,
-                       np.where(trend < -0.1, -0.5, trend * 5))
-        scores['trend'] = np.clip(trend_signal, -1, 1)
-        
-        # 2. 市场宽度：用价格相对位置代理
-        high_60 = prices_df['close'].rolling(60).max()
-        low_60 = prices_df['close'].rolling(60).min()
-        position = (prices_df['close'] - low_60) / (high_60 - low_60 + 1e-8)
-        breadth_signal = np.where(position > 0.8, 0.5,
-                         np.where(position < 0.2, -0.5, 0))
-        scores['breadth'] = breadth_signal
-        
-        # 3. 趋势稳定性：用收益率的自相关性代理
-        returns = prices_df['close'].pct_change()
-        autocorr = returns.rolling(60).apply(
-            lambda x: x.autocorr(lag=1) if len(x) > 10 else 0, raw=False
-        )
-        stability_signal = np.where(autocorr > 0.1, 0.3,  # 正自相关=趋势延续
-                           np.where(autocorr < -0.1, -0.3, 0))
-        scores['stability'] = stability_signal
-        
-        # 综合政策得分
-        final_score = scores.mean(axis=1)
-        return final_score.clip(-1, 1)
-
-
-class GeopoliticalEngine:
-    """地缘政治引擎 - 用避险资产代理地缘风险"""
-    
-    def __init__(self):
-        self.name = "GeopoliticalEngine"
-    
-    def calculate(self, prices_df: pd.DataFrame, gold_df: pd.DataFrame = None) -> pd.Series:
-        """
-        计算地缘政治风险得分
-        
-        代理逻辑：
-        - 黄金上涨 = 避险情绪上升 = 地缘风险上升
-        - 黄金下跌 = 风险偏好上升 = 地缘风险下降
-        - 注意：对A股而言，地缘风险高时应该减仓
-        
-        Returns:
-            得分 [-1, 1]，负值=风险高应减仓，正值=风险低可加仓
-        """
-        scores = pd.DataFrame(index=prices_df.index)
-        
-        # 1. 用A股自身的波动率代理风险
-        returns = prices_df['close'].pct_change()
-        
-        # 尾部风险：用下行波动率
-        downside_returns = returns.copy()
-        downside_returns[downside_returns > 0] = 0
-        downside_vol = downside_returns.rolling(20).std()
-        downside_ma = downside_vol.rolling(60).mean()
-        
-        risk_signal = np.where(downside_vol > downside_ma * 1.5, -0.5,  # 下行风险高
-                      np.where(downside_vol < downside_ma * 0.7, 0.5, 0))  # 下行风险低
-        scores['downside_risk'] = risk_signal
-        
-        # 2. 最大回撤速度：快速下跌=恐慌
-        cum_returns = (1 + returns).cumprod()
-        rolling_max = cum_returns.rolling(20).max()
-        drawdown = (cum_returns - rolling_max) / rolling_max
-        dd_signal = np.where(drawdown < -0.05, -0.5,  # 快速下跌
-                   np.where(drawdown > -0.01, 0.3, 0))
-        scores['drawdown'] = dd_signal
-        
-        # 3. 如果有黄金数据，用黄金走势
-        if gold_df is not None and len(gold_df) > 0:
-            # 对齐日期
-            gold_aligned = gold_df.reindex(prices_df.index, method='ffill')
-            if 'close' in gold_aligned.columns:
-                gold_returns = gold_aligned['close'].pct_change(5)
-                # 黄金上涨=避险=对A股不利
-                gold_signal = np.where(gold_returns > 0.02, -0.4,
-                             np.where(gold_returns < -0.02, 0.4, 0))
-                scores['gold_hedge'] = gold_signal
-        
-        # 综合地缘政治得分（注意：负值=风险高）
-        final_score = scores.mean(axis=1)
-        return final_score.clip(-1, 1)
-
-
-class MultiFactorEngine:
-    """多因子综合引擎 - 整合情绪/政策/地缘政治"""
-    
-    def __init__(self):
-        self.sentiment = SentimentEngine()
-        self.policy = PolicyEngine()
-        self.geopolitical = GeopoliticalEngine()
-    
-    def calculate_all(
-        self, 
-        prices_df: pd.DataFrame,
-        gold_df: pd.DataFrame = None,
-        weights: Dict[str, float] = None
-    ) -> pd.DataFrame:
-        """
-        计算所有因子得分
-        
-        Args:
-            prices_df: ETF价格数据
-            gold_df: 黄金ETF数据（可选）
-            weights: 因子权重 {'sentiment': 0.4, 'policy': 0.3, 'geopolitical': 0.3}
+            vol_5d = df['volume'].iloc[-5:].mean()
+            vol_20d = df['volume'].iloc[-20:].mean()
+            vol_ratio = vol_5d / (vol_20d + 1e-8)
             
-        Returns:
-            DataFrame包含各因子得分和综合得分
+            price_change = df['close'].iloc[-1] / df['close'].iloc[-5] - 1
+            
+            if vol_ratio > 1.5 and price_change > 0.02:
+                volume_signals.append(0.8)  # 放量上涨
+            elif vol_ratio > 1.5 and price_change < -0.02:
+                volume_signals.append(-0.8)  # 放量下跌
+            elif vol_ratio < 0.7:
+                volume_signals.append(0.0)  # 缩量观望
+            else:
+                volume_signals.append(price_change * 5)  # 正常量，按价格变化
+        
+        if not volume_signals:
+            return 0.0
+        return np.clip(np.mean(volume_signals), -1, 1)
+    
+    def _calc_breadth_sentiment(self, all_prices: Dict[str, pd.DataFrame]) -> float:
         """
-        if weights is None:
-            weights = {'sentiment': 0.4, 'policy': 0.3, 'geopolitical': 0.3}
+        市场广度情绪: 上涨家数占比
+        - 80%+上涨 = 极度乐观
+        - 20%-上涨 = 极度悲观
+        """
+        if not all_prices:
+            return 0.0
         
-        result = pd.DataFrame(index=prices_df.index)
+        rising_count = 0
+        total_count = 0
         
-        # 计算各因子
-        result['sentiment'] = self.sentiment.calculate(prices_df)
-        result['policy'] = self.policy.calculate(prices_df)
-        result['geopolitical'] = self.geopolitical.calculate(prices_df, gold_df)
+        for symbol, df in all_prices.items():
+            if len(df) < 5:
+                continue
+            total_count += 1
+            price_change = df['close'].iloc[-1] / df['close'].iloc[-5] - 1
+            if price_change > 0:
+                rising_count += 1
         
-        # 综合得分
-        result['combined'] = (
-            result['sentiment'] * weights['sentiment'] +
-            result['policy'] * weights['policy'] +
-            result['geopolitical'] * weights['geopolitical']
-        )
+        if total_count == 0:
+            return 0.0
         
-        # 信号强度分类
-        result['signal'] = np.where(result['combined'] > 0.3, 2,    # 强烈看多
-                           np.where(result['combined'] > 0.1, 1,     # 看多
-                           np.where(result['combined'] < -0.3, -2,   # 强烈看空
-                           np.where(result['combined'] < -0.1, -1,   # 看空
-                           0))))                                       # 中性
-        
-        return result
+        breadth = rising_count / total_count
+        # 映射到 [-1, 1]
+        sentiment = (breadth - 0.5) * 2
+        return np.clip(sentiment, -1, 1)
     
-    def get_summary(self, factor_df: pd.DataFrame) -> Dict:
-        """获取因子分析摘要"""
-        latest = factor_df.iloc[-1] if len(factor_df) > 0 else None
+    def _calc_trend_consensus(self, benchmark_df: Optional[pd.DataFrame]) -> float:
+        """
+        趋势一致性: 多时间周期趋势同向=强情绪
+        - 5日/10日/20日/60日均线多头排列 = 乐观
+        - 空头排列 = 悲观
+        - 混乱 = 中性
+        """
+        if benchmark_df is None or len(benchmark_df) < 60:
+            return 0.0
         
-        if latest is None:
-            return {}
+        close = benchmark_df['close']
+        ma5 = close.iloc[-5:].mean()
+        ma10 = close.iloc[-10:].mean()
+        ma20 = close.iloc[-20:].mean()
+        ma60 = close.iloc[-60:].mean()
         
-        return {
-            'sentiment': latest['sentiment'],
-            'policy': latest['policy'],
-            'geopolitical': latest['geopolitical'],
-            'combined': latest['combined'],
-            'signal': latest['signal'],
-            'signal_text': {
-                2: '强烈看多', 1: '看多', 0: '中性', -1: '看空', -2: '强烈看空'
-            }.get(int(latest['signal']), '未知')
-        }
+        current = close.iloc[-1]
+        
+        # 多头排列得分
+        bull_score = 0
+        if current > ma5: bull_score += 0.25
+        if ma5 > ma10: bull_score += 0.25
+        if ma10 > ma20: bull_score += 0.25
+        if ma20 > ma60: bull_score += 0.25
+        
+        # 空头排列得分
+        bear_score = 0
+        if current < ma5: bear_score += 0.25
+        if ma5 < ma10: bear_score += 0.25
+        if ma10 < ma20: bear_score += 0.25
+        if ma20 < ma60: bear_score += 0.25
+        
+        # 映射到 [-1, 1]
+        if bull_score > bear_score:
+            return bull_score
+        else:
+            return -bear_score
+    
+    def get_history_extreme(self, threshold: float = 0.8) -> list:
+        """获取历史极端情绪点"""
+        return [(i, s) for i, s in enumerate(self.history) if abs(s) > threshold]
 
 
-def test_engine():
-    """测试引擎"""
-    import sqlite3
+# ========== 集成到策略中的使用示例 ==========
+
+def sentiment_factor_for_strategy(benchmark_df: pd.DataFrame, all_prices: Dict[str, pd.DataFrame]) -> dict:
+    """
+    为策略提供的情绪因子接口
+    返回情绪值和是否触发极端操作
+    """
+    engine = SentimentEngine()
+    result = engine.calculate(all_prices, benchmark_df)
     
-    print("=" * 60)
-    print("QuanTrade 2.0 - 多因子引擎测试")
+    return {
+        'sentiment': result['sentiment'],
+        'is_emotion_high': result['sentiment'] > 0.8,   # 情绪高点 -> 减仓
+        'is_emotion_low': result['sentiment'] < -0.8,   # 情绪低点 -> 加仓
+        'level': result['level'],
+        'action': result['action'],
+        'components': result['components']
+    }
+
+
+if __name__ == '__main__':
+    # 测试示例
+    print("Sentiment Engine Test")
     print("=" * 60)
     
-    # 加载数据
-    conn = sqlite3.connect("QuanTrade/quant_system/data/quant.db")
+    # 创建模拟数据
+    dates = pd.date_range('2024-01-01', '2026-06-01', freq='D')
+    np.random.seed(42)
     
-    # 加载沪深300ETF作为基准
-    df = pd.read_sql("SELECT * FROM etf_daily_prices WHERE symbol='510300' ORDER BY trade_date", conn)
-    df['trade_date'] = pd.to_datetime(df['trade_date'])
-    df = df.set_index('trade_date')
+    # 模拟上涨行情（低波动+持续上涨）
+    prices = 100 * np.cumprod(1 + np.random.normal(0.001, 0.01, len(dates)))
+    benchmark = pd.DataFrame({'close': prices}, index=dates)
+    benchmark['volume'] = 1000000 + np.random.randint(-200000, 200000, len(dates))
     
-    # 加载黄金数据
-    gold = pd.read_sql("SELECT * FROM gold_daily_prices ORDER BY date", conn)
-    gold['date'] = pd.to_datetime(gold['date'])
-    gold = gold.set_index('date')
+    all_prices = {
+        '510300': benchmark.copy(),
+        '159995': benchmark.copy() * 1.1,
+    }
     
-    conn.close()
+    engine = SentimentEngine()
     
-    print(f"\n沪深300数据: {len(df)} 条")
-    print(f"黄金数据: {len(gold)} 条")
-    
-    # 计算因子
-    engine = MultiFactorEngine()
-    factors = engine.calculate_all(df, gold_df=gold)
-    
-    print(f"\n因子计算完成: {len(factors)} 条")
-    print(f"\n最新因子得分:")
-    summary = engine.get_summary(factors)
-    for k, v in summary.items():
-        if isinstance(v, float):
-            print(f"  {k}: {v:.3f}")
-        else:
-            print(f"  {k}: {v}")
-    
-    # 统计信号分布
-    print(f"\n信号分布:")
-    signal_counts = factors['signal'].value_counts().sort_index()
-    for signal, count in signal_counts.items():
-        pct = count / len(factors) * 100
-        label = {2: '强烈看多', 1: '看多', 0: '中性', -1: '看空', -2: '强烈看空'}.get(signal, '未知')
-        print(f"  {label}: {count} ({pct:.1f}%)")
-    
-    return factors
-
-
-if __name__ == "__main__":
-    test_engine()
+    # 测试多个日期
+    test_dates = ['2024-03-01', '2024-06-01', '2024-12-01', '2025-06-01', '2025-12-01', '2026-03-01']
+    for d in test_dates:
+        if d in benchmark.index:
+            result = engine.calculate(all_prices, benchmark, d)
+            print(f"\n{d}: sentiment={result['sentiment']:.2f} [{result['level']}] -> {result['action']}")
+            print(f"  components: {result['components']}")
