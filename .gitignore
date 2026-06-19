@@ -20,6 +20,11 @@ ENV/
 .env
 *.env
 
+# ===== 敏感信息（绝不能上传！） =====
+.secrets/
+*.secret
+*.key
+
 # ===== 日志 =====
 *.log
 logs/
