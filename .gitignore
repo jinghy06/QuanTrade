@@ -57,3 +57,4 @@ htmlcov/
 # ===== 其他 =====
 streamlit.log
 .claude/
+GITHUB_TOKEN.md
