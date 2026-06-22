@@ -590,10 +590,12 @@ class EvaluationAgent:
     
     def _calculate_sortino(self, strategy_returns: pd.Series, benchmark_returns: pd.Series) -> float:
         """计算年化索提诺比率（Sortino Ratio）- 只惩罚下行波动"""
-        excess = strategy_returns - benchmark_returns
+        excess = (strategy_returns - benchmark_returns).dropna()
+        if len(excess) == 0:
+            return 0.0
         downside = excess[excess < 0]
         if len(downside) == 0 or downside.std() == 0:
-            return 0.0  # 无下行波动时返回0（不是inf）
+            return float('inf') if excess.mean() > 0 else 0.0
         return (excess.mean() * 252) / (downside.std() * np.sqrt(252))
 
 

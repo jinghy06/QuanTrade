@@ -549,9 +549,12 @@ def main():
     print("=" * 70)
     
     agent = EvaluationAgent(verbose=True)
-    common = nav_df['date'].isin(bench_nav['date'])
-    s_ret = nav_df.loc[common, 'returns'].dropna()
-    b_ret = bench_nav.set_index('date')['returns'].reindex(nav_df.loc[common, 'date']).dropna()
+    common_dates = nav_df['date'].isin(bench_nav['date'])
+    s_ret_raw = nav_df.loc[common_dates].set_index('date')['returns']
+    b_ret_raw = bench_nav.set_index('date')['returns'].reindex(s_ret_raw.index)
+    aligned = pd.concat([s_ret_raw, b_ret_raw], axis=1).dropna()
+    s_ret = aligned.iloc[:, 0]
+    b_ret = aligned.iloc[:, 1]
     
     report = agent.full_evaluation(s_ret, b_ret)
     agent.print_report(report)
