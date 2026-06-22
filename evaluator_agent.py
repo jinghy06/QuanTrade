@@ -168,6 +168,9 @@ class EvaluationAgent:
         sharpe = self._calculate_sharpe(strategy_returns)
         benchmark_sharpe = self._calculate_sharpe(benchmark_returns)
         
+        # 索提诺比率（只惩罚下行波动）
+        sortino = self._calculate_sortino(strategy_returns, benchmark_returns)
+        
         # 最大回撤
         max_dd = self._calculate_max_drawdown(strategy_returns)
         benchmark_dd = self._calculate_max_drawdown(benchmark_returns)
@@ -188,6 +191,7 @@ class EvaluationAgent:
             'benchmark_annual_return': benchmark_annual,
             'sharpe_ratio': sharpe,
             'benchmark_sharpe': benchmark_sharpe,
+            'sortino_ratio': sortino,
             'max_drawdown': max_dd,
             'benchmark_max_drawdown': benchmark_dd,
             'win_rate': win_rate,
@@ -200,6 +204,7 @@ class EvaluationAgent:
         self.log(f"  基准总收益: {benchmark_total:.2%}")
         self.log(f"  超额收益: {excess_return:.2%}")
         self.log(f"  夏普比率: {sharpe:.2f}")
+        self.log(f"  索提诺比率: {sortino:.2f}")
         self.log(f"  最大回撤: {max_dd:.2%}")
         self.log(f"  胜率: {win_rate:.2%}")
         
@@ -583,6 +588,15 @@ class EvaluationAgent:
         drawdown = (cum - running_max) / running_max
         return drawdown.min()
     
+    def _calculate_sortino(self, strategy_returns: pd.Series, benchmark_returns: pd.Series) -> float:
+        """计算年化索提诺比率（Sortino Ratio）- 只惩罚下行波动"""
+        excess = strategy_returns - benchmark_returns
+        downside = excess[excess < 0]
+        if len(downside) == 0 or downside.std() == 0:
+            return 0.0  # 无下行波动时返回0（不是inf）
+        return (excess.mean() * 252) / (downside.std() * np.sqrt(252))
+
+
     def _calculate_score(self, metrics: Dict) -> float:
         """
         计算综合评分（0-100）
@@ -590,6 +604,7 @@ class EvaluationAgent:
         评分维度：
         - 超额收益：25分
         - 夏普比率：20分
+        - 索提诺比率：10分
         - 过拟合检测：25分（惩罚分）
         - Walk-Forward一致性：15分
         - 统计显著性：15分
@@ -620,6 +635,19 @@ class EvaluationAgent:
         elif sharpe > 0.5:
             score += 3
         elif sharpe > 0:
+            score += 0
+        else:
+            score -= 10
+        
+        # 索提诺比率（±10分）- 只惩罚下行波动
+        sortino = metrics.get('sortino_ratio', 0)
+        if sortino > 2.0:
+            score += 10
+        elif sortino > 1.0:
+            score += 7
+        elif sortino > 0.5:
+            score += 3
+        elif sortino > 0:
             score += 0
         else:
             score -= 10
@@ -701,6 +729,7 @@ class EvaluationAgent:
             ('基准收益', 'benchmark_total_return', '%'),
             ('超额收益', 'excess_return', '%'),
             ('夏普比率', 'sharpe_ratio', '.2f'),
+            ('索提诺比率', 'sortino_ratio', '.2f'),
             ('最大回撤', 'max_drawdown', '%'),
             ('胜率', 'win_rate', '%'),
             ('过拟合评分', 'overfit_score', '.2f'),
