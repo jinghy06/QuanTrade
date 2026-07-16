@@ -169,20 +169,34 @@ def calculate_momentum_score(etf_df: pd.DataFrame, benchmark_df: pd.DataFrame, s
 # 三因子
 # ============================================================
 def calculate_three_factors(benchmark_df: pd.DataFrame, gold_df: pd.DataFrame, all_prices: dict = None) -> dict:
-    """三因子计算：使用简单版本（精细情绪引擎当前数据条件下会降低收益）"""
+    """三因子计算：优先使用数据库中的 sentiment_1d（新闻+合成情绪），fallback 到价格代理"""
     if benchmark_df is None or len(benchmark_df) < 60:
         return {'sentiment': 0, 'geopolitical': 0, 'policy': 0, 'combined': 0}
     
     close = benchmark_df['close']
-    returns = close.pct_change()
     
-    vol_20 = returns.rolling(20).std().iloc[-1]
-    vol_ma60 = returns.rolling(60).std().iloc[-1]
-    vol_signal = -0.5 if vol_20 > vol_ma60 * 1.5 else (0.5 if vol_20 < vol_ma60 * 0.7 else 0)
-    mom_5 = close.pct_change(5).iloc[-1]
-    mom_60 = close.pct_change(60).iloc[-1]
-    mom_signal = 0.5 if mom_5 > 0 and mom_60 > 0 else (-0.5 if mom_5 < 0 and mom_60 < 0 else 0)
-    sentiment = np.clip((vol_signal + mom_signal) / 2, -1, 1)
+    # === 优先读取数据库中的情绪值（新闻+合成情绪）===
+    sentiment = None
+    if 'sentiment_1d' in benchmark_df.columns:
+        latest = benchmark_df['sentiment_1d'].iloc[-1]
+        if not pd.isna(latest):
+            sentiment = latest
+            # 如果还有3日/7日情绪，可做极端判断增强
+            if 'sentiment_3d' in benchmark_df.columns:
+                s3d = benchmark_df['sentiment_3d'].iloc[-1]
+                if not pd.isna(s3d) and abs(s3d) > 0.6:
+                    sentiment = (sentiment + s3d) / 2  # 平滑处理
+    
+    # Fallback: 纯价格代理（原始逻辑）
+    if sentiment is None:
+        returns = close.pct_change()
+        vol_20 = returns.rolling(20).std().iloc[-1]
+        vol_ma60 = returns.rolling(60).std().iloc[-1]
+        vol_signal = -0.5 if vol_20 > vol_ma60 * 1.5 else (0.5 if vol_20 < vol_ma60 * 0.7 else 0)
+        mom_5 = close.pct_change(5).iloc[-1]
+        mom_60 = close.pct_change(60).iloc[-1]
+        mom_signal = 0.5 if mom_5 > 0 and mom_60 > 0 else (-0.5 if mom_5 < 0 and mom_60 < 0 else 0)
+        sentiment = np.clip((vol_signal + mom_signal) / 2, -1, 1)
     
     geo = 0
     if gold_df is not None and len(gold_df) > 60:
