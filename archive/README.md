@@ -5,6 +5,7 @@
 - `legacy_v2/`：根目录原 ETF 系统、评价、因子和 Streamlit 页面。
 - `legacy_signal/quant_system/`：原个股机器人、模型、数据工具与旧数据库。
 - `legacy_research/`：原根目录 v1.1 研究脚本。
+- `legacy_daily/`：GitHub 原有日更、信号报告与邮件脚本，保留为历史参考。
 - 既有 `experiments/`、`old_versions/` 等目录保留原内容。
 
 移动记录见 `v3_migration_manifest.json`，单文件保存移动前 SHA256。已有 v2.0.2c 未提交修改随文件原样移动，v2.2.0 的既有删除状态没有恢复。

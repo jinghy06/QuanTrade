@@ -68,5 +68,30 @@
     "source": "QuanTrade/quant_system",
     "destination": "archive/legacy_signal/quant_system",
     "sha256": null
+  },
+  {
+    "source": "daily_run.py",
+    "destination": "archive/legacy_daily/daily_run.py",
+    "sha256": "69e0cd654c29f13c068a0ee5ef6d9fbb9d72a6b73026f2d2a0f38886a8b7f739"
+  },
+  {
+    "source": "daily_signal_report.py",
+    "destination": "archive/legacy_daily/daily_signal_report.py",
+    "sha256": "4bdb3a3efd6b457372abfb73cbf949146df3d49137747043740bfc749c9f1ea6"
+  },
+  {
+    "source": "daily_update.py",
+    "destination": "archive/legacy_daily/daily_update.py",
+    "sha256": "cb4e6004e1dd969f883663dd37eaac859bd966ef431c2c5989e49319be334fbd"
+  },
+  {
+    "source": "send_report_126.py",
+    "destination": "archive/legacy_daily/send_report_126.py",
+    "sha256": "a141fd40aaaa5bdfc14f13603b7a3c95d254b051ac6ccef3628a164d94dec2d4"
+  },
+  {
+    "source": "send_report_126_README.md",
+    "destination": "archive/legacy_daily/send_report_126_README.md",
+    "sha256": "0bd966d9a64a0081cb26e60cba012ae0145125d5b2c11cc643c8ef6337ce02b5"
   }
 ]
