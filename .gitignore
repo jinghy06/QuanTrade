@@ -58,3 +58,9 @@ htmlcov/
 streamlit.log
 .claude/
 GITHUB_TOKEN.md
+
+# v3 local immutable research artifacts and pre-migration backups
+/backups/
+/data/
+/runs/
+/models/v3/

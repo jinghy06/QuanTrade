@@ -1,0 +1,72 @@
+[
+  {
+    "source": "app.py",
+    "destination": "archive/legacy_v2/app.py",
+    "sha256": "13514164546364B385EBF7AD47044515876AA178B141EEFB25C9000A5F75AF30"
+  },
+  {
+    "source": "calc_buy_hold.py",
+    "destination": "archive/legacy_v2/calc_buy_hold.py",
+    "sha256": "7604A275003280D0C96DC4FDA79D7301768F423257C0F07DC95E38FFB7EFD877"
+  },
+  {
+    "source": "check_buy_hold.py",
+    "destination": "archive/legacy_v2/check_buy_hold.py",
+    "sha256": "7E1DBE71C8ECC8934F4E4083FC0B67B1AAE085562F9C8952A9613A115219E331"
+  },
+  {
+    "source": "cross_market_data.py",
+    "destination": "archive/legacy_v2/cross_market_data.py",
+    "sha256": "B4B33A4CCA8D18A4C230A33300D5FB0CF9032FDDF4C8097F749FDD57306B3004"
+  },
+  {
+    "source": "evaluator_agent.py",
+    "destination": "archive/legacy_v2/evaluator_agent.py",
+    "sha256": "E0666672C5D24E04B1A4999B362AED3883C1C32F158509DE476D4803FD0F45D6"
+  },
+  {
+    "source": "geopolitical_engine.py",
+    "destination": "archive/legacy_v2/geopolitical_engine.py",
+    "sha256": "E7582064446B0A81387EF30F300618B1D4A8E6A1B44B7AAE1EBFA0F42622C165"
+  },
+  {
+    "source": "gold_hedge.py",
+    "destination": "archive/legacy_v2/gold_hedge.py",
+    "sha256": "0AC199C30A2A01F9E19E765C47206CA8F4069C68E960173D3F0396EC45294C8B"
+  },
+  {
+    "source": "independent_review.py",
+    "destination": "archive/legacy_v2/independent_review.py",
+    "sha256": "07C348D4871430749085663D805F50F5ED375529B385A2CA6893B3ECA8575173"
+  },
+  {
+    "source": "policy_engine.py",
+    "destination": "archive/legacy_v2/policy_engine.py",
+    "sha256": "095EAC29DC9226DF1CD9A23FF5600619275A4D10BD0761AA884CE151813169A9"
+  },
+  {
+    "source": "sector_rotation.py",
+    "destination": "archive/legacy_v2/sector_rotation.py",
+    "sha256": "90CD377032FC430634D7C42B109BE05274CAB09F174AD1AE13974F7409FF251E"
+  },
+  {
+    "source": "sentiment_engine.py",
+    "destination": "archive/legacy_v2/sentiment_engine.py",
+    "sha256": "94D064F7D3228D35EE0F6BFD38B9F1A2623B46FC34FB1C7047B35620939AEDBF"
+  },
+  {
+    "source": "run_etf_system_v2.0.2c.py",
+    "destination": "archive/legacy_v2/run_etf_system_v2.0.2c.py",
+    "sha256": "E3F1FC59A1EEEC980C48A78D37AA37B74C8A606D24AD3E1EB01CB88AB0377827"
+  },
+  {
+    "source": "quant_system",
+    "destination": "archive/legacy_research",
+    "sha256": null
+  },
+  {
+    "source": "QuanTrade/quant_system",
+    "destination": "archive/legacy_signal/quant_system",
+    "sha256": null
+  }
+]

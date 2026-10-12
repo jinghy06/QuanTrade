@@ -562,7 +562,8 @@ def main():
     
     return {
         'strategy_ret': strategy_ret, 'bench_ret': bench_ret, 'excess': excess,
-        'max_dd': max_dd, 'trade_count': trade_count, 'report': report
+        'max_dd': max_dd, 'trade_count': trade_count, 'report': report,
+        'nav_df': nav_df, 'bench_nav': bench_nav
     }
 
 

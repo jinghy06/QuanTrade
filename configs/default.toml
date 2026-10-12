@@ -1,0 +1,46 @@
+[paths]
+database = "../data/quantrade.sqlite"
+runs = "../runs"
+models = "../models/v3"
+legacy_database = "../archive/legacy_signal/quant_system/data/quant.db"
+
+[strategy]
+frequency = "monthly"
+lookback = 60
+max_positions = 5
+max_weight = 0.25
+max_theme_weight = 0.40
+cash_reserve = 0.05
+min_weight_change = 0.02
+model_weight = 0.35
+factors_enabled = true
+sentiment_threshold = 0.75
+geopolitical_threshold = 0.70
+policy_threshold = -0.60
+risk_reduction = 0.50
+cooldown_days = 20
+
+[execution]
+initial_cash = 50000.0
+commission = 0.0003
+min_fee = 0.0
+slippage = 0.0005
+
+[model]
+horizons = [1, 5, 10, 20]
+seed = 42
+min_train_dates = 120
+validation_dates = 40
+test_dates = 40
+n_estimators = 80
+max_age_days = 120
+
+[data]
+jump_threshold = 0.35
+event_min_confidence = 0.6
+corporate_actions_verified = false
+execution_rules_verified = false
+calendar_verified = false
+
+# Rates and limits are research assumptions. Confirm instrument rules, broker
+# fees and historical data before admitting a run as official performance.

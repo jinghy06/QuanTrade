@@ -1,187 +1,92 @@
-# QuanTrade 2.0 - A股ETF量化交易系统
+# QuanTrade 3.0
 
-> 五层架构 + 独立评价Agent，防止过拟合，诚实评估
+ETF 中低频交易系统：统一数据、模型训练、预测 K 线、情绪／政策／地缘决策、组合执行与份额账本。常规月度或季度轮动，风险事件可生成受约束减仓建议，人工执行。
 
-## 版本对照
+## 安装与入口
 
-| 版本 | 机器学习 | 核心策略 | 超额收益 | 评分 | 状态 |
-|------|---------|---------|---------|------|------|
-| **v2.0.1** | ✅ LightGBM/RF/GB | 择时+轮动+对冲+多因子 | +136% vs 沪深300 | **B(73分)** | 历史最佳（ML） |
-| **v2.0.2c** | ❌ 纯动量规则 | 买入持有+大跌加仓+情绪减仓 | +0.22% vs 等权24只 | **C(55分)** | 当前稳定版 |
+在 Git 根目录，使用 Python 3.11+：
 
-> v2.0.2c 去掉 ML 的原因：2024-2026 持续牛市中，2022-2023 熊市训练数据严重不匹配，导致 ML 模型失效。改为纯动量+用户策略融入。
-
-## 核心特性
-
-- **五层信号架构**：择时 + 轮动 + 黄金对冲 + 多因子 + 数据优化
-- **独立评价Agent**：7维度评估，防止"为了目标而达到目标"
-- **三因子引擎**：市场情绪 + 国际政治 + 国内政策
-- **用户策略融入**：从实际交易记录提取5大模式
-- **纯动量选股**：去掉ML模型，适配牛市
-
-## 用户策略融入（从交易记录提取）
-
-1. **大跌建仓**：沪指跌3% + ETF跌10-15% → 试探建仓10%
-2. **分批建仓**：每跌5%加仓20%，反弹确认后加满
-3. **上升潮加仓**：3天连涨/突破均线 → 加仓30%
-4. **目标收益减仓**：涨20% → 减仓30%
-5. **情绪高点减仓**：情绪>0.6（连宝妈都入场）→ 减仓30-50%，区分情绪泡沫ETF vs 业绩支撑ETF
-
-## 快速开始
-
-```bash
-# 安装依赖
-pip install lightgbm pandas numpy scikit-learn baostock
-
-# 运行 v2.0.2c（当前推荐版本）
-python run_etf_system_v2.0.2c.py
-
-# 运行 v2.0.1（ML版本，需要完整训练数据）
-python run_etf_system_v2.0.1.py
-
-# 独立评估
-python evaluator_agent.py
+```powershell
+.venv/Scripts/python.exe -m pip install -e ".[dev,data,ui]"
+.venv/Scripts/python.exe -m quantrade --help
 ```
 
-## 项目结构
+安装后可直接用 `quantrade`。默认路径相对仓库 `configs/default.toml`，不依赖启动目录。自定义配置：`quantrade --config C:/path/default.toml ...`。核心依赖为 pandas、numpy、LightGBM、sklearn；采集与页面为可选依赖，legacy 依赖组仅用于旧实现恢复。
 
-```
-QuanTrade/
-├── run_etf_system_v2.0.1.py     # v2.0.1: ML策略（LightGBM/RF/GB）
-├── run_etf_system_v2.0.2c.py    # v2.0.2c: 纯动量+三因子（当前推荐）
-├── evaluator_agent.py             # 独立评价Agent（核心）
-├── supervision_agent.py           # 独立监督Agent
-├── sentiment_engine.py            # 情绪/政策/地缘引擎（市场代理）
-├── geopolitical_engine.py         # 国际政治因子引擎
-├── policy_engine.py               # 国内政策因子引擎
-├── sector_rotation.py             # 热点板块轮动
-├── gold_hedge.py                  # 黄金对冲模块
-├── optimize_trading_rules.py      # 交易规则参数优化
-├── GITHUB_TOKEN.md                # GitHub上传Token存放处
-├── QUANTRADE_2.0.1_REPORT.md     # 2.0.1版本完整报告
-├── OPTIMIZATION_PLAN_v2.0.2.md   # 2.0.2优化计划
-└── QuanTrade/
-    └── quant_system/
-        └── data/
-            └── quant.db            # SQLite数据库（24只ETF）
+## 数据
+
+```powershell
+quantrade data migrate
+quantrade data validate
+quantrade data snapshot
+quantrade data import-instruments --file configs/instruments.csv
+quantrade data update --symbols 510300 510500 --start 2025-01-01 --end 2026-10-12
 ```
 
-## 五层架构（v2.0.1 ML版本）
+旧库只读，新库为 `data/quantrade.sqlite`。原始导出与异常保存在 `data/migration/`。相同重复价格合并；冲突隔离；极端行情保留待核查。
 
-```
-Layer 1: 策略C核心（择时+轮动）
-├── LightGBM择时模型
-├── RandomForest备选
-└── GradientBoosting备选
+标的信息不自动认证名称、行业、上市日期和交易规则。编辑 instruments.csv 后导入；核验来源后才能设 verified=true，不能将行情开始日期视为上市日期。实际账户应确认 T+0／T+1、交易单位、费用、现金预留。默认配置是研究假设。
 
-Layer 2: 热点板块轮动
-├── 动量得分（短期/中期/长期）
-├── 趋势得分（均线排列）
-├── 相对强度（vs基准）
-└── 波动率调整（夏普近似）
+- `data import-prices --file prices.csv --basis raw`：symbol,date,open,high,low,close,volume,amount；可带 source,fetched_at,price_basis,verified。拒绝覆盖冲突价格。
+- `data import-events --file events.csv`：event_id,category,published_at,available_at,valid_until,score,confidence,source,content。时间必须带时区，category 为 sentiment/policy/geopolitical，score 为 [-1,1]。修订用新 ID。
+- `data import-actions --file actions.csv`：event_id,date,symbol,split,dividend。dividend 为当日实际支付的每份现金额；split 为份额倍数。复杂除息应收和跨日付款须转换为可核对事件，系统不猜测公司行动。
+- `data resolve-issue --id ISSUE_ID --explanation 证据说明`：记录解释后关闭异常。标的与价格口径另行核验。
 
-Layer 3: 黄金对冲
-└── 518880黄金ETF（3036条数据）
+## 回测与审计
 
-Layer 4: 情绪/政策/地缘政治（三因子引擎）
-├── 情绪因子：波动率、动量、成交量（市场代理）
-├── 政策因子：趋势强度、市场宽度、市场宽度
-└── 地缘因子：黄金走势、VIX代理、国际事件
-
-Layer 5: 数据驱动优化
-└── 参数网格搜索（100种组合）
+```powershell
+quantrade backtest --start 2025-01-02 --end 2026-06-18 --allow-unverified
+quantrade backtest --start 2025-01-02 --end 2026-06-18 --walk-forward --allow-unverified --cost-levels 0.0003 0.001
 ```
 
-## 五层架构（v2.0.2c 纯动量版本）
+比较等权满仓买入持有、固定风险敞口、动量、动量＋模型、完整多因子。满仓基准保留；其他策略共用集中度约束。收盘决策，下一交易日开盘成交，收盘估值；持仓缺价标为陈旧，不归零、不假定成交。
 
+滚动验证在调仓前执行历史训练、标签清洗、验证和后续预测；窗口保留训练边界，持仓跨窗口连续。无足够模型数据时降级动量。成本测试重新执行成交和账本。
+
+`runs/v3-实验编号/` 保存配置、数据快照、代码摘要、净值、持仓、目标、订单、成交、模型窗口、预测、评价与 `audit.json`；独立审计从流水重建现金、份额，核对每一天 NAV。阅读 `REPORT.md` 查看结果。
+
+默认拒绝校验未通过的数据；`--allow-unverified` 显式生成 exploratory 结果。旧行情口径、标的规则和跳变尚未核验时不能形成正式实盘结论。模拟没有盘口排队与冲击模型；涨跌停和停牌信息不足须作为执行限制披露。
+
+## 模型、预测 K 线与多因子
+
+```powershell
+quantrade model train --cutoff 2026-05-01
+quantrade model validate --version model-训练结果编号
+quantrade model publish --version model-训练结果编号
+quantrade forecast --date 2026-10-12 --symbol 510300
 ```
-Layer 1: 纯动量选股（120日/60日/20日相对强弱）
-Layer 2: 热点板块轮动（4因子评分）
-Layer 3: 黄金对冲（518880，地缘风险信号）
-Layer 4: 三因子仓位调整（情绪/政治/政策）
-Layer 5: 交易规则优化（季度调仓→半年调仓→无定期调仓）
+
+统一 ETF 特征与多期限回归，按日期分区、按标签期限清洗；未知标签保留缺失。缺失中位数仅从训练区间学习，训练与推理输入一致。模型不能预测其训练／验证／测试信息边界以前的日期，发布记录可获取时间，过期模型降级。
+
+validate 是技术验收，publish 是本地研究发布，均不代表实盘准入。滚动交易回放与因子消融评价增量价值。
+
+预测图保留模型锚点、插值路径与误差区间；固定种子的模拟影线不是训练出的 OHLC。锚点区间使用验证集绝对误差的 90% 分位数，测试覆盖率留档，未来覆盖率仍需观察。图表日期使用工作日近似，不能用于认定成交或止损。
+
+回看历史预测可使用 `quantrade forecast --date YYYY-MM-DD --symbol ETF_CODE --model-version MODEL_ID --research`；该模型的信息边界仍必须早于预测日期，输出标为历史研究，不修改生产发布记录。
+
+情绪／政策／地缘读取当时可获得、未过期的冻结事件；没有真实来源时明确标为行情代理或 unavailable。因子影响统一风险预算，不各自买卖；事件锁定、冷却与计划调仓恢复防止每日重复减仓。LLM 解析可按冻结事件格式导入，首轮不绑定外部模型服务。
+
+## 账户与页面
+
+```powershell
+quantrade account init --id actual --mode actual --cash 50000 --complete
+quantrade account import-fills --id actual --file fills.csv
+quantrade report --account actual --date 2026-06-18
+quantrade dashboard
 ```
 
-## 独立评价Agent
+初始化现金应是完整回放起点，不是忽略已有持仓后的当前现金。未声明 complete 的账户不生成订单建议；已有账户拒绝重置。成交字段见 configs/fills.example.csv，side 为 buy/sell。同一成交幂等，冲突 ID、历史倒序记录拒绝入账；整批成功才保存。
 
-防止过拟合的核心机制，7维度评估：
+报告冻结当天决策，不成交、不推送、不修改持仓。建议数量按已知收盘价估算；下一交易日须确认交易所日历。分红记录、账户流水或未来日历不完整时，不能将建议当成可立即执行的订单。
 
-1. **基础收益分析**：总收益、夏普、最大回撤
-2. **过拟合检测**：训练期vs测试期表现差异（修复了极低超额时的伪衰减）
-3. **Walk-Forward验证**：滚动窗口测试
-4. **统计显著性检验**：t检验、Bootstrap置信区间
-5. **市场环境适应性**：牛市/熊市/震荡市表现
-6. **交易成本敏感性**：盈亏平衡成本分析
-7. **预测能力检验**：准确率、精确率、召回率
+只读监控页面整合账户、调仓、回测、数据、预测与决策五个视图。
 
-评分体系：A(80+)/B(65+)/C(50+)/D(35+)/F(<35)
+## 代码与测试
 
-## 三因子分析引擎
+正式包 src/quantrade，配置 configs，页面 ui。历史功能和重复入口按迁移清单归档；模型、预测与因子能力迁入正式包。见 [重构计划](ETF_REFACTOR_PLAN.md) 和 [升级记录](V3_UPGRADE_REPORT.md)。
 
-| 因子 | 数据源 | 代理指标 | 用途 |
-|------|--------|---------|------|
-| 市场情绪 | 沪深300日K | 波动率、5日/60日动量 | 情绪高点减仓 |
-| 国际政治 | 黄金ETF(518880) | 5日/20日涨幅、均线突破 | 地缘风险信号 |
-| 国内政策 | 沪深300日K | 120日趋势、60日高低点位置 | 政策宽松/收紧 |
+```powershell
+.venv/Scripts/python.exe -m pytest -q
+```
 
-> 当前为**市场代理模式**，真正的三因子需接入外部数据源：
-> - 情绪：财联社电报、雪球热榜、百度搜索指数
-> - 政治：新闻爬虫、地缘政治事件数据库
-> - 政策：央行公告、国务院文件、证监会通知
-
-## 数据说明
-
-- **ETF池**：24只ETF（宽基、军工、AI、芯片、新能源、机器人、科创等）
-- **数据覆盖**：
-  - 完整4.5年（2022-2026）：8只（562500, 515070, 159995, 512660, 512670, 515960, 516510, 510300）
-  - 约1年（2025-2026）：1只（159550）
-  - 仅2026年：15只（其余，无法在2024-2025回测中使用）
-- **数据源**：Baostock API / akshare / Tushare Pro
-- **频率**：日线
-- **交易成本**：0.36%（单边0.18%）
-
-## 优化历程
-
-| 版本 | 评分 | 策略收益 | 超额收益 | 基准 | 交易次数 | 核心改动 |
-|------|------|----------|---------|------|----------|---------|
-| v2.0初始 | F(10分) | -50.60% | - | - | 69 | 初始策略 |
-| v2.0.1 | **B(73分)** | **+161%** | +136% vs 沪深300 | 沪深300 | 11 | ML五层架构 |
-| v2.0.2 | F(23分) | +38.7% | -46% vs 等权 | 等权24只 | 52 | 基准改为等权 |
-| v2.0.2b | F(23分) | +26.0% | -58% vs 等权 | 等权24只 | 52 | 持有期限3月 |
-| v2.0.2c | **C(55分)** | **+84.9%** | **+0.22%** vs 等权 | 等权24只 | 8 | 无定期调仓+满仓 |
-
-> v2.0.2c 的关键发现：**在持续牛市中，"持有不动"就是最好的策略**。任何定期调仓都会因交易成本而跑输等权基准。
-
-## 下一步优化方向（v2.1）
-
-1. **增加ETF数据**：补充用户实际交易的ETF（159382, 588790, 159605）
-2. **精细情绪检测**：从市场代理升级到真实舆情数据（财联社、雪球）
-3. **跨市场数据**：接入港股、美股ETF，增强三因子分析
-4. **更长回测周期**：获取2018-2022年历史数据，覆盖完整牛熊周期
-5. **用户持仓映射**：将策略输出与用户实际持仓对比，生成调仓建议
-
-## 数据缺口
-
-当前数据库中**缺少**以下用户实际交易的ETF：
-- `159382` — AI创业板（用户持仓+33%）
-- `588790` — 科创智能（用户持仓+0%）
-- `159605` — 互联中概（用户持仓+0.7%）
-
-需要补充这些ETF的历史数据，才能准确回测用户实际持仓策略。
-
-## GitHub 上传
-
-- **仓库**：`https://github.com/jinghy06/QuanTrade.git`
-- **Token存放**：`GITHUB_TOKEN.md`（已加入.gitignore，安全）
-- **上传方法**：详见 `GITHUB_TOKEN.md`
-
-## 风险提示
-
-- 本系统仅供学习研究，不构成投资建议
-- 回测结果不代表未来表现
-- v2.0.2c 在牛市中接近"买入持有"，超额收益微弱（+0.22%）
-- 请用小资金验证，控制风险
-
-## License
-
-MIT
+数据库、模型、实验与 `backups/v3-pre-refactor/` 不提交 Git，迁移清单纳入版本管理。先核对恢复材料再处理备份。工程正确与策略有效分开验收。

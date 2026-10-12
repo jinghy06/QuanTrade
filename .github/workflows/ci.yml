@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.10', '3.11', '3.12']
+        python-version: ['3.11', '3.12']
 
     steps:
       - name: Checkout code
@@ -24,20 +24,13 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -e ".[dev,backtest]"
+        run: pip install -e ".[dev,ui]"
 
       - name: Run ruff check
-        run: ruff check .
+        run: ruff check src ui tests/v3
 
       - name: Run ruff format check
-        run: ruff format --check .
-
-      - name: Run mypy
-        run: mypy QuanTrade/quant_system/
-        env:
-          PYTHONPATH: QuanTrade/quant_system/
+        run: ruff format --check src ui tests/v3
 
       - name: Run pytest
-        run: pytest tests/ -v
-        env:
-          PYTHONPATH: QuanTrade/quant_system/
+        run: pytest -v

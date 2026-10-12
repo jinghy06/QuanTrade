@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 # Ensure the quant_system package is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "QuanTrade" / "quant_system"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "archive" / "legacy_signal" / "quant_system"))
 
 import numpy as np
 import pandas as pd
